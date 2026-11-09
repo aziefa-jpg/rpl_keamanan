@@ -1,174 +1,97 @@
 import 'package:flutter/material.dart';
+import '../config/dependency_injector.dart';
 import '../models/user.dart';
 import '../repositories/user_repository.dart';
-import '../repositories/user_repository_impl.dart';
+import '../services/api_service.dart';
 
-/// Halaman untuk menampilkan daftar pengguna.
 class UserListScreen extends StatefulWidget {
-  final UserRepository? repository;
+  final UserRepository? userRepository;
 
-  const UserListScreen({super.key, this.repository});
+  const UserListScreen({super.key, this.userRepository});
 
   @override
   State<UserListScreen> createState() => _UserListScreenState();
 }
 
 class _UserListScreenState extends State<UserListScreen> {
-  late final UserRepository _repository;
-  List<User> _users = [];
-  bool _isLoading = true;
-  String? _errorMessage;
+  late final UserRepository _userRepository;
+  late Future<List<User>> _usersFuture;
 
   @override
   void initState() {
     super.initState();
-    _repository = widget.repository ?? UserRepositoryImpl();
-    _loadUsers();
+    _userRepository = widget.userRepository ?? locator.userRepository;
+    _refreshUsers();
   }
 
-  Future<void> _loadUsers() async {
+  void _refreshUsers() {
     setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+      _usersFuture = _userRepository.getUsers();
     });
-
-    try {
-      final users = await _repository.getUsers();
-      setState(() {
-        _users = users;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Daftar Pengguna'),
+        title: const Text('Daftar User'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadUsers,
-            tooltip: 'Muat ulang',
-          ),
-        ],
       ),
-      body: _buildBody(),
-    );
-  }
+      body: FutureBuilder<List<User>>(
+        future: _usersFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Memuat data...'),
-          ],
-        ),
-      );
-    }
+          if (snapshot.hasError) {
+            final error = snapshot.error;
+            final errorMessage = error is ApiException
+                ? error.message
+                : 'Gagal memuat data user.';
 
-    if (_errorMessage != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 64, color: Colors.red),
-              const SizedBox(height: 16),
-              const Text(
-                'Terjadi Kesalahan',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _loadUsers,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Coba Lagi'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_users.isEmpty) {
-      return const Center(child: Text('Tidak ada data pengguna'));
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadUsers,
-      child: ListView.builder(
-        itemCount: _users.length,
-        itemBuilder: (context, index) {
-          final user = _users[index];
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.deepPurple,
-                child: Text(
-                  user.name.isNotEmpty ? user.name[0] : '?',
-                  style: const TextStyle(color: Colors.white),
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                    const SizedBox(height: 12),
+                    Text(
+                      errorMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _refreshUsers,
+                      child: const Text('Coba Lagi'),
+                    ),
+                  ],
                 ),
               ),
-              title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(user.email),
-              onTap: () => _showUserDetail(user),
-            ),
+            );
+          }
+
+          final users = snapshot.data ?? [];
+          if (users.isEmpty) {
+            return const Center(child: Text('Tidak ada data user.'));
+          }
+
+          return ListView.builder(
+            itemCount: users.length,
+            itemBuilder: (context, index) {
+              final user = users[index];
+              return ListTile(
+                leading: CircleAvatar(child: Text('${user.id}')),
+                title: Text(user.name),
+                subtitle: Text(user.email),
+              );
+            },
           );
         },
-      ),
-    );
-  }
-
-  void _showUserDetail(User user) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              user.name,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Username: ${user.username}'),
-            Text('Email: ${user.email}'),
-            Text('Telepon: ${user.phone}'),
-            Text('Website: ${user.website}'),
-            Text('Perusahaan: ${user.companyName}'),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Tutup'),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

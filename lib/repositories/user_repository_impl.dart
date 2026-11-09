@@ -2,25 +2,19 @@ import '../models/user.dart';
 import '../services/api_service.dart';
 import 'user_repository.dart';
 
-/// Implementasi dari UserRepository.
 class UserRepositoryImpl implements UserRepository {
-  late final ApiService _apiService;
+  final ApiService apiService;
 
-  UserRepositoryImpl({ApiService? apiService}) {
-    _apiService = apiService ?? ApiService();
-  }
+  UserRepositoryImpl({required this.apiService});
 
   @override
   Future<List<User>> getUsers() async {
-    return await _apiService.getUsers();
-  }
+    final responseData = await apiService.get('/users');
 
-  @override
-  Future<User> getUserById(int id) async {
-    return await _apiService.getUserById(id);
-  }
-
-  void dispose() {
-    _apiService.dispose();
+    if (responseData is List) {
+      return responseData.map((json) => User.fromJson(json)).toList();
+    } else {
+      throw ApiException('Format data user tidak valid.');
+    }
   }
 }

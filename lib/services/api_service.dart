@@ -1,97 +1,69 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
-import '../models/user.dart';
 
-/// Service untuk komunikasi HTTP dengan REST API.
+/// Class Exception kustom untuk menangani error respons API
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  ApiException(this.message, [this.statusCode]);
+
+  @override
+  String toString() => message;
+}
+
 class ApiService {
   final http.Client _client;
-  final String _baseUrl;
 
-  ApiService({http.Client? client, String? baseUrl})
-      : _client = client ?? http.Client(),
-        _baseUrl = baseUrl ?? AppConfig.baseUrl;
+  ApiService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Mengambil daftar pengguna dari API.
-  Future<List<User>> getUsers() async {
-    try {
-      _logRequest('GET', '/users');
-      final response = await _client
-          .get(
-            Uri.parse('$_baseUrl/users'),
-            headers: buildHeaders(),
-          )
-          .timeout(Duration(seconds: AppConfig.timeoutSeconds));
+  /// Request GET umum (tanpa/dengan Auth Header)
+  Future<dynamic> get(String endpoint, {String? token}) async {
+    final baseUrl = AppConfig.apiBaseUrl;
+    final uri = Uri.parse('$baseUrl$endpoint');
 
-      _logResponse(response.statusCode);
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        return data.map((json) => User.fromJson(json)).toList();
-      } else {
-        throw Exception('Gagal memuat data. Status: ${response.statusCode}');
-      }
-    } on TimeoutException {
-      throw Exception('Request timeout. Periksa koneksi internet Anda.');
-    } on SocketException {
-      throw Exception('Tidak ada koneksi internet. Periksa jaringan Anda.');
-    } on FormatException {
-      throw Exception('Format data tidak valid.');
-    } catch (e) {
-      throw Exception('Terjadi kesalahan: $e');
-    }
-  }
-
-  /// Mengambil pengguna berdasarkan [id].
-  Future<User> getUserById(int id) async {
-    try {
-      _logRequest('GET', '/users/$id');
-      final response = await _client
-          .get(
-            Uri.parse('$_baseUrl/users/$id'),
-            headers: buildHeaders(),
-          )
-          .timeout(Duration(seconds: AppConfig.timeoutSeconds));
-
-      _logResponse(response.statusCode);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        return User.fromJson(data);
-      } else {
-        throw Exception('Gagal memuat data. Status: ${response.statusCode}');
-      }
-    } on TimeoutException {
-      throw Exception('Request timeout. Periksa koneksi internet Anda.');
-    } on SocketException {
-      throw Exception('Tidak ada koneksi internet. Periksa jaringan Anda.');
-    } catch (e) {
-      throw Exception('Terjadi kesalahan: $e');
-    }
-  }
-
-  /// Membangun header untuk request HTTP dengan API key dari AppConfig.
-  Map<String, String> buildHeaders() {
-    return {
+    final headers = <String, String>{
       'Content-Type': 'application/json',
-      'X-API-Key': AppConfig.apiKey,
+      'Accept': 'application/json',
     };
+
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    try {
+      debugPrint('[GET] $uri');
+      final response = await _client.get(uri, headers: headers);
+      return _handleResponse(response);
+    } on SocketException {
+      throw ApiException('Tidak ada koneksi internet. Periksa jaringan Anda.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Terjadi kesalahan tidak terduga: $e');
+    }
   }
 
-  /// Logging request (hanya mencetak method dan endpoint).
-  void _logRequest(String method, String endpoint) {
-    print('[$method] $endpoint');
-  }
+  /// Penanganan HTTP Status Code (Latihan 5)
+  dynamic _handleResponse(http.Response response) {
+    debugPrint('Response Status Code: ${response.statusCode}');
 
-  /// Logging response (hanya status code).
-  void _logResponse(int statusCode) {
-    print('Response status: $statusCode');
-  }
-
-  /// Menutup client.
-  void dispose() {
-    _client.close();
+    switch (response.statusCode) {
+      case 200:
+      case 201:
+        return jsonDecode(response.body);
+      case 400:
+        throw ApiException('Permintaan tidak valid (400 Bad Request).', 400);
+      case 401:
+        throw ApiException('Sesi berakhir atau token tidak valid (401 Unauthorized).', 401);
+      case 403:
+        throw ApiException('Akses ditolak (403 Forbidden).', 403);
+      case 404:
+        throw ApiException('Data tidak ditemukan (404 Not Found).', 404);
+      case 500:
+      default:
+        throw ApiException('Terjadi kesalahan server (${response.statusCode}).', response.statusCode);
+    }
   }
 }
